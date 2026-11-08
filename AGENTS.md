@@ -39,11 +39,11 @@ Develop on **WSL2 (Linux, RTX 5070 GPU → needs the CUDA ≥ 12.8 torch build)*
 | `cellphi/calibration.py` | `Calibration`: scale bar (length, px, reference image size) → units/px for any image width. |
 | `cellphi/segment.py` | `Segmenter` (wraps `CellposeModel`, lazy imports torch/cellpose), `SegmentationSettings`. |
 | `cellphi/measure.py` | `measure_masks()`: per-label measurement, fragment/border/size exclusion, IDs. Pure numpy/OpenCV. |
-| `cellphi/pipeline.py` | `process_image()`: read → segment (with auto size retry) → measure. `DEFAULT_CALIBRATION`. |
+| `cellphi/pipeline.py` | `process_image()`: read → segment (with auto size retry) → measure. `DEFAULT_CALIBRATION`. `find_images()`: recursive folder search (skips hidden dirs, the output dir, `*_annotated`/`*_masks` files; keeps names unique). |
 | `cellphi/draw.py` | `annotate()`: outlines, Feret lines, `#id`/diameter labels. |
 | `cellphi/results.py` | CSV rows (`organoid_rows`, `summary_row`, `write_csv`). |
 | `cellphi/cli.py` | `cellphi` command (argparse). |
-| `tests/test_measure.py` | Unit tests on synthetic masks (no model needed). |
+| `tests/` | Unit tests: `test_measure.py` (synthetic masks), `test_find_images.py` (folder search). No model needed. |
 | `notebooks/example.ipynb` | Example for Jupyter/Colab. |
 | `input/` | Sample images, all 2048×1536 JPEG. |
 

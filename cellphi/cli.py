@@ -34,7 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Segment organoids with Cellpose and measure their diameters (maximum Feret diameter).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("inputs", nargs="+", help="image files and/or folders of images")
+    p.add_argument("inputs", nargs="+",
+                   help="image files and/or folders (folders are searched recursively, including subfolders)")
+    p.add_argument("--no-recursive", action="store_true", help="only use images directly inside the given folders")
     p.add_argument("-o", "--output", default="results", help="output folder")
     p.add_argument("--version", action="version", version=f"cellphi {__version__}")
 
@@ -102,14 +104,16 @@ def main(argv: list[str] | None = None) -> int:
     warnings.filterwarnings("ignore", message=r".*[Ss]parse.*")
 
     calibration = calibration_from_args(args)
+    out = Path(args.output)
     try:
-        images = find_images(args.inputs)
+        images = find_images(args.inputs, recursive=not args.no_recursive, exclude_dirs=[out])
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     if not images:
         print("Error: no images found.", file=sys.stderr)
         return 1
+    print(f"Found {len(images)} image(s).")
 
     from .segment import SegmentationSettings, Segmenter
 
@@ -119,17 +123,18 @@ def main(argv: list[str] | None = None) -> int:
     if segmenter.device.type == "cpu":
         print("  (CPU is slow: expect a minute or more per image.)")
 
-    out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
     all_rows, summaries = [], []
 
-    for i, path in enumerate(images, start=1):
+    for i, item in enumerate(images, start=1):
+        path = item.path
         t0 = time.time()
-        print(f"[{i}/{len(images)}] {path.name}")
+        print(f"[{i}/{len(images)}] {item.name}")
         settings = SegmentationSettings(flow_threshold=args.flow_threshold, cellprob_threshold=args.cellprob_threshold)
         try:
             res = process_image(
                 path, segmenter, calibration, settings,
+                name=item.name,
                 expected_diameter=args.expected_diameter,
                 min_diameter=args.min_diameter,
                 exclude_border=not args.keep_border,
@@ -144,13 +149,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {w}x{h} px, calibration {calibration.describe(w, h)}")
         if res.size_hint and not args.expected_diameter:
             print(f"  Cellpose did better when told the organoid size; used an estimated {res.size_hint:.0f} {res.unit}")
-        stem = path.stem
-        cv2.imwrite(str(out / f"{stem}_annotated.jpg"),
+        # Mirror the input's subfolders in the output folder.
+        stem = out / Path(item.name).with_suffix("")
+        stem.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(f"{stem}_annotated.jpg",
                     annotate(res.image, res.organoids, res.units_per_px, label=args.label,
                              show_excluded=not args.hide_excluded),
                     [cv2.IMWRITE_JPEG_QUALITY, 95])
         if args.save_masks:
-            cv2.imwrite(str(out / f"{stem}_masks.png"), res.masks.astype(np.uint16))
+            cv2.imwrite(f"{stem}_masks.png", res.masks.astype(np.uint16))
 
         all_rows += organoid_rows(res.name, res.organoids, res.units_per_px, res.unit)
         summary = summary_row(res.name, res.organoids, res.units_per_px, res.unit)

@@ -35,10 +35,17 @@ pip install -r requirements.txt    # installs everything, including GPU-enabled 
 ## Usage
 
 ```bash
-cellphi input/ -o results/              # every image in a folder
+cellphi input/ -o results/              # every image in a folder, including all subfolders
 cellphi input/36.jpg input/52.jpg       # specific images
+cellphi input/ --no-recursive           # only images directly in input/, not subfolders
 cellphi --help                          # all options
 ```
+
+Folders are searched recursively for `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff` and `.bmp` files.
+The output folder mirrors the input's subfolders (e.g. `input/day3/A1.jpg` → `results/day3/A1_annotated.jpg`),
+and the CSVs list each image by its path inside the input folder (`day3/A1.jpg`).
+Hidden folders, the output folder and Cellphi's own output images are skipped, so it is safe to re-run
+on the same folder.
 
 Output in `results/`:
 

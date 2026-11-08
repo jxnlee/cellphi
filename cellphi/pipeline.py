@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -139,15 +140,64 @@ def process_image(
     )
 
 
-def find_images(inputs: list[str | Path]) -> list[Path]:
-    """Expand files and directories into a sorted list of image paths."""
-    paths: list[Path] = []
+@dataclass(frozen=True)
+class ImageInput:
+    path: Path
+    name: str  # path relative to the input folder (e.g. "day3/A1.jpg"); used for output names and CSVs
+
+
+def _is_cellphi_output(path: Path) -> bool:
+    return path.stem.endswith(("_annotated", "_masks"))
+
+
+def find_images(
+    inputs: list[str | Path], recursive: bool = True, exclude_dirs: list[str | Path] = ()
+) -> list[ImageInput]:
+    """Expand files and folders into a sorted list of images.
+
+    Folders are searched recursively (unless ``recursive=False``). Hidden folders (e.g. .git,
+    .venv), folders in ``exclude_dirs`` (e.g. the output folder) and Cellphi's own output files
+    are skipped. Names are kept unique so outputs from different subfolders don't overwrite
+    each other.
+    """
+    excluded = [Path(d).resolve() for d in exclude_dirs]
+    found: list[ImageInput] = []
+    seen_paths: set[Path] = set()
+    used_names: set[str] = set()
+
+    def add(path: Path, name: str, root_name: str) -> None:
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            return
+        seen_paths.add(resolved)
+        if name in used_names:  # same relative name from two different input folders
+            name = f"{root_name}/{name}"
+        base, n = name, 2
+        while name in used_names:
+            name = f"{Path(base).with_suffix('')}_{n}{Path(base).suffix}"
+            n += 1
+        used_names.add(name)
+        found.append(ImageInput(path, name))
+
     for item in inputs:
         p = Path(item)
         if p.is_dir():
-            paths += sorted(q for q in p.iterdir() if q.suffix.lower() in IMAGE_EXTENSIONS)
-        elif p.exists():
-            paths.append(p)
+            files: list[Path] = []
+            for dirpath, dirnames, filenames in os.walk(p):
+                d = Path(dirpath)
+                # Prune hidden and excluded folders in place so os.walk doesn't descend into them.
+                dirnames[:] = sorted(
+                    n for n in dirnames
+                    if not n.startswith(".") and not any((d / n).resolve() == e for e in excluded)
+                )
+                files += [d / f for f in filenames if not f.startswith(".")]
+                if not recursive:
+                    break
+            for f in sorted(files):
+                if f.suffix.lower() in IMAGE_EXTENSIONS and not _is_cellphi_output(f):
+                    add(f, f.relative_to(p).as_posix(), p.resolve().name)
+        elif p.is_file():
+            add(p, p.name, p.resolve().parent.name)
         else:
             raise FileNotFoundError(f"No such file or directory: {p}")
-    return paths
+    return found
