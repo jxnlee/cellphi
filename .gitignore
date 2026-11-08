@@ -1,1 +1,22 @@
 .venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Generated outputs
+results/
+output*/
+*_output*.jpg
+*_annotated.jpg
+
+# Cellpose GUI saves / masks (large)
+*_seg.npy
+*.npy
+
+# Notebook outputs
+notebooks/*.csv
+notebooks/*.jpg
