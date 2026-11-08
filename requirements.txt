@@ -10,6 +10,8 @@ torch
 # Segmentation + image handling
 cellpose>=4.0,<5
 numpy>=1.24
+# Intel Macs only get PyTorch up to 2.2, which needs numpy 1.x
+numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
 opencv-python-headless>=4.8
 scipy>=1.10
 tifffile

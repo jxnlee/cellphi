@@ -21,8 +21,12 @@ pip install -r requirements.txt    # installs everything, including GPU-enabled 
 
 - **GPU:** On Linux/Windows with an NVIDIA GPU, the GPU is used automatically. Without one it runs on CPU, just slower.
   Apple Silicon Macs use the Mac's GPU automatically.
-- **Mac:** use plain `pip` as shown above. `uv pip install -r requirements.txt` can fail on a Mac
-  because of the extra PyTorch download source.
+- **Mac:** the Python that ships with macOS (3.9) is too old. Install Python 3.12 from
+  [python.org](https://www.python.org/downloads/) or with `brew install python@3.12`, then create the
+  environment with `python3.12 -m venv .venv`. Use plain `pip` as shown above, not `uv pip`:
+  `uv` can fail on a Mac because of the extra PyTorch download source.
+  - *Apple Silicon (M1–M4):* the Mac's GPU is used automatically.
+  - *Intel Macs:* runs on CPU only and needs Python 3.12 or older, because PyTorch has no newer builds for Intel Macs.
 - **Google Colab:** Choose *Runtime → Change runtime type → GPU*, then run `!pip install -r requirements.txt` in a cell.
 - **Slow connection:** PyTorch is a large download (several GB). If it times out, run the same command again;
   already downloaded files are reused.
