@@ -43,11 +43,18 @@ def test_skips_output_folder_and_cellphi_outputs_even_if_not_excluded(tree):
     assert not any("annotated" in n or "masks" in n for n in found)
 
 
-def test_unique_names_across_inputs(tmp_path):
-    touch(tmp_path / "exp1" / "img.jpg")
-    touch(tmp_path / "exp2" / "img.jpg")
-    found = names(find_images([tmp_path / "exp1", tmp_path / "exp2"]))
-    assert found == ["img.jpg", "exp2/img.jpg"]
+def test_several_input_folders_keep_their_names(tmp_path):
+    touch(tmp_path / "Cortical" / "Plate 1" / "A1" / "x.jpg")
+    touch(tmp_path / "Midbrain" / "Plate 1" / "A1" / "y.jpg")
+    found = names(find_images([tmp_path / "Cortical", tmp_path / "Midbrain"]))
+    assert found == ["Cortical/Plate 1/A1/x.jpg", "Midbrain/Plate 1/A1/y.jpg"]
+
+
+def test_unique_names_for_same_file_name(tmp_path):
+    touch(tmp_path / "a" / "img.jpg")
+    touch(tmp_path / "b" / "img.jpg")
+    found = names(find_images([tmp_path / "a" / "img.jpg", tmp_path / "b" / "img.jpg"]))
+    assert found == ["img.jpg", "b/img.jpg"]
 
 
 def test_files_and_duplicates(tree):

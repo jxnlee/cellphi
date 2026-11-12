@@ -15,6 +15,7 @@ import numpy as np
 from . import __version__
 from .calibration import Calibration
 from .draw import LABEL_MODES, annotate
+from .measure import DEFAULT_DIAMETER, DIAMETER_METHODS
 from .pipeline import DEFAULT_CALIBRATION, find_images, process_image
 from .results import organoid_rows, summary_row, write_csv
 
@@ -31,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = DEFAULT_CALIBRATION
     p = argparse.ArgumentParser(
         prog="cellphi",
-        description="Segment organoids with Cellpose and measure their diameters (maximum Feret diameter).",
+        description="Segment organoids with Cellpose and measure their diameters.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("inputs", nargs="+",
@@ -55,8 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--unit", default=d.unit, help="unit name used in outputs")
 
     m = p.add_argument_group("measurement")
-    m.add_argument("--keep-border", action="store_true",
-                   help="also measure organoids touching the image edge (their diameters will be underestimated)")
+    m.add_argument("--diameter", choices=DIAMETER_METHODS, default=DEFAULT_DIAMETER,
+                   help="how diameter is defined: 'equivalent' = diameter of a circle with the same area "
+                        "(matches manual ImageJ measurements best); 'max_feret' / 'min_feret' = longest / "
+                        "shortest caliper width; 'mean_feret' = average caliper width")
+    m.add_argument("--exclude-edge", action="store_true",
+                   help="exclude organoids touching the image edge (by default they are measured and "
+                        "flagged, since their diameter is underestimated)")
     m.add_argument("--keep-fragments", action="store_true",
                    help="do not exclude the lens-shaped regions where two organoids overlap")
     m.add_argument("--min-diameter", type=float, default=0.0,
@@ -69,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="typical organoid diameter (real units). Normally estimated automatically; "
                         "set it if organoids are missed or split")
     s.add_argument("--no-auto-size", action="store_true",
-                   help="skip the automatic second Cellpose pass with an estimated organoid size (faster)")
+                   help="don't estimate the organoid size from the image; run Cellpose without a size hint")
+    s.add_argument("--no-dark-fallback", action="store_true",
+                   help="don't add solid dark organoids that Cellpose missed (e.g. a single very large one)")
     s.add_argument("--flow-threshold", type=float, default=0.4,
                    help="raise (e.g. 0.6) to accept more irregular shapes, lower to be stricter")
     s.add_argument("--cellprob-threshold", type=float, default=0.0,
@@ -137,9 +145,11 @@ def main(argv: list[str] | None = None) -> int:
                 name=item.name,
                 expected_diameter=args.expected_diameter,
                 min_diameter=args.min_diameter,
-                exclude_border=not args.keep_border,
+                exclude_border=args.exclude_edge,
                 exclude_fragments=not args.keep_fragments,
                 auto_size=not args.no_auto_size,
+                rescue_dark=not args.no_dark_fallback,
+                diameter_method=args.diameter,
             )
         except Exception as e:  # keep going with the other images
             print(f"  Error processing {path}: {e}", file=sys.stderr)
@@ -148,26 +158,29 @@ def main(argv: list[str] | None = None) -> int:
         h, w = res.image.shape[:2]
         print(f"  {w}x{h} px, calibration {calibration.describe(w, h)}")
         if res.size_hint and not args.expected_diameter:
-            print(f"  Cellpose did better when told the organoid size; used an estimated {res.size_hint:.0f} {res.unit}")
+            print(f"  estimated typical organoid size: {res.size_hint:.0f} {res.unit}")
+        if res.n_rescued:
+            print(f"  added {res.n_rescued} dark organoid(s) that Cellpose missed")
         # Mirror the input's subfolders in the output folder.
         stem = out / Path(item.name).with_suffix("")
         stem.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(f"{stem}_annotated.jpg",
                     annotate(res.image, res.organoids, res.units_per_px, label=args.label,
-                             show_excluded=not args.hide_excluded),
+                             show_excluded=not args.hide_excluded, diameter_method=args.diameter, unit=res.unit),
                     [cv2.IMWRITE_JPEG_QUALITY, 95])
         if args.save_masks:
             cv2.imwrite(f"{stem}_masks.png", res.masks.astype(np.uint16))
 
-        all_rows += organoid_rows(res.name, res.organoids, res.units_per_px, res.unit)
-        summary = summary_row(res.name, res.organoids, res.units_per_px, res.unit)
+        all_rows += organoid_rows(res.name, res.organoids, res.units_per_px, res.unit, args.diameter)
+        summary = summary_row(res.name, res.organoids, res.units_per_px, res.unit, args.diameter)
         summaries.append(summary)
-        mean = summary[f"mean_diameter_{res.unit}"]
-        print(f"  {summary['n_measured']} organoids measured "
-              f"(excluded: {summary['n_excluded_border']} at edge, "
-              f"{summary['n_excluded_overlap_fragments']} overlap fragments, "
-              f"{summary['n_excluded_small']} too small); "
-              f"mean diameter {mean} {res.unit}  [{time.time() - t0:.1f}s]")
+        excluded = [f"{summary[k]} {what}" for k, what in [
+            ("n_excluded_edge", "at edge"), ("n_excluded_overlap_fragments", "overlap fragments"),
+            ("n_excluded_small", "too small")] if summary[k]]
+        print(f"  {summary['n_measured']} organoids measured ({summary['n_touching_edge']} touching the edge)"
+              + (f", excluded: {', '.join(excluded)}" if excluded else "")
+              + f"; median diameter {summary[f'median_diameter_{res.unit}']} {res.unit}"
+              f"  [{time.time() - t0:.1f}s]")
 
     if not summaries:
         return 1

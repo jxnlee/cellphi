@@ -11,18 +11,17 @@ import cv2
 import numpy as np
 
 from .calibration import Calibration
-from .measure import Organoid, measure_masks
+from .foreground import add_missed_dark_blobs, estimate_diameter_px, to_gray8
+from .measure import DEFAULT_DIAMETER, Organoid, measure_masks
 
-# Lab default: a scale bar of 1800 um measured as 370 px on a 926x695 px export of the
-# microscope image (the raw camera images are 2048x1536). Assumes the same field of view.
+# Lab default: 1800 um = 370 px, measured on a 926x695 px export of the 2048x1536 camera
+# images, i.e. 2.20 um/px at full resolution. Confirmed against the lab's manual ImageJ
+# measurements (reference/Plate 1 CM_CM): six hand-drawn lines gave 2.19-2.24 um/px.
 DEFAULT_CALIBRATION = Calibration(
     bar_length=1800.0, bar_pixels=370.0, reference_width=926, reference_height=695, unit="um"
 )
 
-# Use the size-hinted Cellpose pass only if it measures at least this many times more organoids.
-AUTO_SIZE_MIN_GAIN = 1.25
-
-IMAGE_EXTENSIONS ={".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
 @dataclass
@@ -33,14 +32,16 @@ class ImageResult:
     organoids: list[Organoid] = field(repr=False)
     units_per_px: float = 1.0
     unit: str = "um"
-    size_hint: float | None = None  # organoid size (units) given to Cellpose, if one was used
+    diameter_method: str = DEFAULT_DIAMETER
+    size_hint: float | None = None  # organoid size (units) given to Cellpose
+    n_rescued: int = 0  # dark organoids added by the fallback (Cellpose missed them)
 
     @property
     def measured(self) -> list[Organoid]:
         return sorted((o for o in self.organoids if o.id is not None), key=lambda o: o.id)
 
     def diameters(self) -> list[float]:
-        return [o.feret_px * self.units_per_px for o in self.measured]
+        return [o.diameter_px(self.diameter_method) * self.units_per_px for o in self.measured]
 
 
 def read_image(path: str | Path) -> np.ndarray:
@@ -72,16 +73,22 @@ def process_image(
     settings=None,
     expected_diameter: float | None = None,
     min_diameter: float = 0.0,
-    exclude_border: bool = True,
+    exclude_border: bool = False,
     exclude_fragments: bool = True,
     auto_size: bool = True,
+    rescue_dark: bool = True,
+    diameter_method: str = DEFAULT_DIAMETER,
     name: str | None = None,
 ) -> ImageResult:
     """Segment and measure one image at its native resolution.
 
-    expected_diameter / min_diameter are in calibration units (e.g. um).
-    If expected_diameter is not given and auto_size is on, a second Cellpose pass with an
-    estimated organoid size is tried and used when it finds clearly more organoids.
+    1. Organoid size: ``expected_diameter`` (calibration units) if given; otherwise estimated
+       from the image (``auto_size``). Cellpose finds far more organoids when told their size
+       (reference data: 99% vs 69% of hand-measured organoids).
+    2. One Cellpose pass with that size.
+    3. ``rescue_dark``: add solid dark organoids Cellpose missed (very large / isolated ones).
+    4. Measure. Organoids touching the image edge are measured and flagged, or excluded with
+       ``exclude_border``. ``min_diameter`` is in calibration units.
     """
     from .segment import SegmentationSettings
 
@@ -94,41 +101,30 @@ def process_image(
 
     h, w = img.shape[:2]
     upp = calibration.units_per_px(w, h)
+    gray = to_gray8(img)
 
     settings = settings or SegmentationSettings()
-    x = _for_cellpose(img)
-
-    def measure(m):
-        return measure_masks(
-            m,
-            exclude_border=exclude_border,
-            min_diameter_px=(min_diameter or 0.0) / upp,
-            exclude_fragments=exclude_fragments,
-        )
-
-    def n_measured(orgs):
-        return sum(o.id is not None for o in orgs)
-
-    size_hint_px = None
     if expected_diameter:
-        size_hint_px = expected_diameter / upp
-        masks = segmenter.segment(x, dataclasses.replace(settings, diameter_px=size_hint_px))
-        organoids = measure(masks)
+        hint_px = expected_diameter / upp
+    elif auto_size:
+        hint_px = estimate_diameter_px(gray)
     else:
-        masks = segmenter.segment(x, settings)
-        organoids = measure(masks)
-        if auto_size:
-            # Cellpose works best when it knows the object size. Estimate it from the first
-            # pass and retry; keep the retry only if it finds clearly more organoids (the first
-            # pass gives slightly tighter outlines when it works).
-            first = measure_masks(masks, exclude_border=False, exclude_fragments=False)
-            if first:
-                est = float(np.median([o.equivalent_diameter_px for o in first]))
-                masks2 = segmenter.segment(x, dataclasses.replace(settings, diameter_px=est))
-                organoids2 = measure(masks2)
-                if n_measured(organoids2) >= AUTO_SIZE_MIN_GAIN * max(n_measured(organoids), 1):
-                    masks, organoids, size_hint_px = masks2, organoids2, est
+        hint_px = None
+    if hint_px:
+        settings = dataclasses.replace(settings, diameter_px=hint_px)
 
+    masks = segmenter.segment(_for_cellpose(img), settings)
+    n_rescued = 0
+    if rescue_dark:
+        masks, n_rescued = add_missed_dark_blobs(masks, gray, hint_px)
+
+    organoids = measure_masks(
+        masks,
+        exclude_border=exclude_border,
+        min_diameter_px=(min_diameter or 0.0) / upp,
+        exclude_fragments=exclude_fragments,
+        diameter_method=diameter_method,
+    )
     return ImageResult(
         name=name,
         image=img,
@@ -136,7 +132,9 @@ def process_image(
         organoids=organoids,
         units_per_px=upp,
         unit=calibration.unit,
-        size_hint=size_hint_px * upp if size_hint_px else None,
+        diameter_method=diameter_method,
+        size_hint=hint_px * upp if hint_px else None,
+        n_rescued=n_rescued,
     )
 
 
@@ -179,6 +177,10 @@ def find_images(
         used_names.add(name)
         found.append(ImageInput(path, name))
 
+    # With several input folders, prefix names with the folder's own name so that, e.g.,
+    # "Cortical/Plate 1/A1" and "Midbrain/Plate 1/A1" stay apart in the outputs.
+    prefix_dirs = sum(Path(i).is_dir() for i in inputs) > 1
+
     for item in inputs:
         p = Path(item)
         if p.is_dir():
@@ -195,7 +197,8 @@ def find_images(
                     break
             for f in sorted(files):
                 if f.suffix.lower() in IMAGE_EXTENSIONS and not _is_cellphi_output(f):
-                    add(f, f.relative_to(p).as_posix(), p.resolve().name)
+                    rel = f.relative_to(p).as_posix()
+                    add(f, f"{p.resolve().name}/{rel}" if prefix_dirs else rel, p.resolve().name)
         elif p.is_file():
             add(p, p.name, p.resolve().parent.name)
         else:

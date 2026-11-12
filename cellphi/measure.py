@@ -26,6 +26,19 @@ ENCLOSED_MAX_RELATIVE_SIZE = 0.5
 # A fragment is given back to an organoid only if this share of it lies in the organoid's convex hull.
 FRAGMENT_MIN_OWNERSHIP = 0.2
 
+# How "diameter" is defined. "equivalent" (diameter of the equal-area circle) matched the lab's
+# manual ImageJ diameters best: median ratio 1.00, mean abs. error 6.8% over 283 organoids;
+# "max_feret" (longest caliper) read ~10% high, "min_feret" ~5% low.
+DIAMETER_METHODS = ("equivalent", "max_feret", "mean_feret", "min_feret")
+DEFAULT_DIAMETER = "equivalent"
+# Plain-language names, used in the image legend.
+DIAMETER_NAMES = {
+    "equivalent": "equal-area circle diameter",
+    "max_feret": "longest line across (max Feret)",
+    "mean_feret": "average width (mean Feret)",
+    "min_feret": "narrowest width (min Feret)",
+}
+
 # Offsets from a pixel centre to its four corners.
 _CORNERS = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]])
 
@@ -41,11 +54,24 @@ class Organoid:
     touches_border: bool = False
     status: str = MEASURED
     id: int | None = None  # 1..n for measured organoids, matches the image annotation and CSV
+    min_feret_px: float = 0.0  # narrowest caliper width
+    mean_feret_px: float = 0.0  # caliper width averaged over all directions
 
     @property
     def equivalent_diameter_px(self) -> float:
         """Diameter of a circle with the same area."""
         return float(np.sqrt(4.0 * self.area_px / np.pi))
+
+    def diameter_px(self, method: str = DEFAULT_DIAMETER) -> float:
+        if method == "equivalent":
+            return self.equivalent_diameter_px
+        if method == "max_feret":
+            return self.feret_px
+        if method == "mean_feret":
+            return self.mean_feret_px
+        if method == "min_feret":
+            return self.min_feret_px
+        raise ValueError(f"Unknown diameter method {method!r}; choose from {DIAMETER_METHODS}")
 
 
 def max_feret(points_xy: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
@@ -70,19 +96,71 @@ def max_feret(points_xy: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
     return float(d[i, j]), hull[i], hull[j]
 
 
+def caliper_widths(points_xy: np.ndarray, n_angles: int = 180) -> np.ndarray:
+    """Feret (caliper) widths in ``n_angles`` directions over 180 degrees, pixel-corner corrected."""
+    pts = np.asarray(points_xy, dtype=np.float32).reshape(-1, 2)
+    hull = cv2.convexHull(pts).reshape(-1, 2)
+    corners = (hull[:, None, :] + _CORNERS[None, :, :]).reshape(-1, 2)
+    theta = np.linspace(0, np.pi, n_angles, endpoint=False)
+    proj = corners @ np.stack([np.cos(theta), np.sin(theta)])
+    return proj.max(axis=0) - proj.min(axis=0)
+
+
+def diameter_line(o: "Organoid", method: str = DEFAULT_DIAMETER, n_angles: int = 360) -> tuple[np.ndarray, np.ndarray]:
+    """End points (x, y) of a line that shows the organoid's diameter on the image.
+
+    The line's length always equals the reported diameter.
+    - max_feret: the longest line across (exact end points on the outline).
+    - otherwise: like a hand-drawn diameter, a line through the organoid's centre, in the
+      direction whose edge-to-edge chord through the centre is closest in length to the
+      diameter, centred on that chord. It therefore runs (nearly) edge to edge inside the outline.
+    """
+    if method == "max_feret":
+        p1, p2 = o.feret_endpoints
+        return np.asarray(p1, float), np.asarray(p2, float)
+    target = o.diameter_px(method)
+    contour = np.asarray(o.contour, dtype=np.int32).reshape(-1, 2)
+    x0, y0 = contour.min(axis=0) - 2
+    x1, y1 = contour.max(axis=0) + 3
+    inside = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.fillPoly(inside, [contour - [x0, y0]], 1)
+    c = np.asarray(o.centroid, float)
+    theta = np.linspace(0, np.pi, n_angles, endpoint=False)
+    u = np.stack([np.cos(theta), np.sin(theta)], axis=1)  # (n_angles, 2)
+    steps = np.arange(0, max(x1 - x0, y1 - y0) + 1, 0.5)
+
+    def reach(sign):
+        """Distance from the centre to the outline along +u / -u, for every direction."""
+        p = c[None, None, :] + sign * steps[None, :, None] * u[:, None, :]
+        ix = np.clip(np.round(p[..., 0]).astype(int) - x0, 0, inside.shape[1] - 1)
+        iy = np.clip(np.round(p[..., 1]).astype(int) - y0, 0, inside.shape[0] - 1)
+        out = inside[iy, ix] == 0
+        first_out = np.where(out.any(axis=1), out.argmax(axis=1), len(steps) - 1)
+        return steps[first_out]
+
+    fwd, back = reach(1), reach(-1)
+    k = int(np.argmin(np.abs(fwd + back - target)))
+    mid = c + u[k] * (fwd[k] - back[k]) / 2  # middle of the chord
+    return mid - u[k] * target / 2, mid + u[k] * target / 2
+
+
 def _measure_region(binary: np.ndarray, y0: int, x0: int, shape: tuple[int, int], border_margin: int) -> dict:
     """Measure one binary region located at (y0, x0) in an image of ``shape``."""
     sub = binary.astype(np.uint8)
     offset = np.array([x0, y0])
     ys, xs = np.nonzero(sub)
     contours, _ = cv2.findContours(sub, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    feret, p1, p2 = max_feret(np.concatenate([c.reshape(-1, 2) for c in contours]) + offset)
+    pts = np.concatenate([c.reshape(-1, 2) for c in contours]) + offset
+    feret, p1, p2 = max_feret(pts)
+    widths = caliper_widths(pts)
     h, w = shape
     return dict(
         area_px=int(len(xs)),
         centroid=(float(xs.mean() + x0), float(ys.mean() + y0)),
         feret_px=feret,
         feret_endpoints=(tuple(p1), tuple(p2)),
+        min_feret_px=float(widths.min()),
+        mean_feret_px=float(widths.mean()),
         contour=max(contours, key=cv2.contourArea).reshape(-1, 2) + offset,
         # Cellpose masks often stop a pixel or two short of the edge, hence the margin.
         touches_border=bool(
@@ -96,10 +174,11 @@ def _measure_region(binary: np.ndarray, y0: int, x0: int, shape: tuple[int, int]
 
 def measure_masks(
     masks: np.ndarray,
-    exclude_border: bool = True,
+    exclude_border: bool = False,
     border_margin: int = BORDER_MARGIN_PX,
     min_diameter_px: float = 0.0,
     exclude_fragments: bool = True,
+    diameter_method: str = DEFAULT_DIAMETER,
 ) -> list[Organoid]:
     """Measure every labelled object in a Cellpose mask (0 = background, 1..N = objects).
 
@@ -110,10 +189,14 @@ def measure_masks(
       other organoids (>= FRAGMENT_MIN_CONTACT of its outline touches them); or small
       (< ENCLOSED_MAX_RELATIVE_SIZE x typical) and almost fully enclosed by organoids. Its pixels
       are added back to the organoids whose outline it lies within.
-    - ``touches_border``: within ``border_margin`` px of the image edge, so cut off.
-    - ``too_small``: Feret diameter below ``min_diameter_px``.
+    - ``touches_border``: only with ``exclude_border``; otherwise organoids within
+      ``border_margin`` px of the image edge are measured and flagged ``touches_border=True``
+      (they are cut off, so their diameter is underestimated).
+    - ``too_small``: diameter (``diameter_method``) below ``min_diameter_px``.
     Measured organoids get ids 1..n in reading order.
     """
+    if diameter_method not in DIAMETER_METHODS:
+        raise ValueError(f"Unknown diameter method {diameter_method!r}; choose from {DIAMETER_METHODS}")
     if masks.ndim != 2:
         raise ValueError(f"Expected a 2D label mask, got shape {masks.shape}.")
     h, w = masks.shape
@@ -176,7 +259,7 @@ def measure_masks(
             status = EXCLUDED_FRAGMENT
         elif exclude_border and r["touches_border"]:
             status = EXCLUDED_BORDER
-        elif r["feret_px"] < min_diameter_px:
+        elif min_diameter_px and _diameter(r, diameter_method) < min_diameter_px:
             status = EXCLUDED_SMALL
         else:
             status = MEASURED
@@ -190,11 +273,22 @@ def measure_masks(
                 contour=r["contour"],
                 touches_border=r["touches_border"],
                 status=status,
+                min_feret_px=r["min_feret_px"],
+                mean_feret_px=r["mean_feret_px"],
             )
         )
 
     number_reading_order([o for o in organoids if o.status == MEASURED])
     return organoids
+
+
+def _diameter(r: dict, method: str) -> float:
+    return {
+        "equivalent": float(np.sqrt(4.0 * r["area_px"] / np.pi)),
+        "max_feret": r["feret_px"],
+        "mean_feret": r["mean_feret_px"],
+        "min_feret": r["min_feret_px"],
+    }[method]
 
 
 def number_reading_order(organoids: list[Organoid]) -> None:
