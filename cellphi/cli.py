@@ -17,7 +17,7 @@ from .calibration import Calibration
 from .draw import LABEL_MODES, annotate
 from .measure import DEFAULT_DIAMETER, DIAMETER_METHODS
 from .pipeline import DEFAULT_CALIBRATION, find_images, process_image
-from .results import organoid_rows, summary_row, write_csv
+from .results import ORGANOID_COLUMNS, organoid_rows, summary_row, write_csv
 
 
 def _size(text: str) -> tuple[int, int]:
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  (CPU is slow: expect a minute or more per image.)")
 
     out.mkdir(parents=True, exist_ok=True)
-    all_rows, summaries = [], []
+    summaries = []
 
     for i, item in enumerate(images, start=1):
         path = item.path
@@ -173,7 +173,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.save_masks:
             cv2.imwrite(f"{stem}_masks.png", res.masks.astype(np.uint16))
 
-        all_rows += organoid_rows(res.name, res.organoids, res.units_per_px, res.unit, args.diameter)
+        # One CSV per image, next to its annotated image.
+        write_csv(f"{stem}_organoids.csv",
+                  organoid_rows(res.name, res.organoids, res.units_per_px, res.unit, args.diameter),
+                  fieldnames=ORGANOID_COLUMNS(res.unit))
         summary = summary_row(res.name, res.organoids, res.units_per_px, res.unit, args.diameter)
         summaries.append(summary)
         excluded = [f"{summary[k]} {what}" for k, what in [
@@ -186,9 +189,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if not summaries:
         return 1
-    write_csv(out / "organoids.csv", all_rows)
     write_csv(out / "summary.csv", summaries)
-    print(f"Results written to {out}/ (organoids.csv, summary.csv, *_annotated.jpg)")
+    print(f"Results written to {out}/: one <image>_organoids.csv and <image>_annotated.jpg per image, "
+          f"plus summary.csv (one row per image)")
     return 0
 
 

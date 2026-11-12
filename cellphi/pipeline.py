@@ -177,9 +177,23 @@ def find_images(
         used_names.add(name)
         found.append(ImageInput(path, name))
 
-    # With several input folders, prefix names with the folder's own name so that, e.g.,
-    # "Cortical/Plate 1/A1" and "Midbrain/Plate 1/A1" stay apart in the outputs.
-    prefix_dirs = sum(Path(i).is_dir() for i in inputs) > 1
+    # With several input folders, prefix names with each folder's path relative to their common
+    # parent, so e.g. "Cortical/Plate 1/A1" and "Midbrain/Plate 1/A1", or "Plate 1/A1" and
+    # "Plate 2/A1", stay apart in the outputs.
+    dirs = [Path(i).resolve() for i in inputs if Path(i).is_dir()]
+    try:
+        common = Path(os.path.commonpath(dirs)) if len(dirs) > 1 else None
+    except ValueError:  # e.g. folders on different Windows drives
+        common = None
+    by_name = len(dirs) > 1 and common is None
+
+    def prefix(d: Path) -> str:
+        if by_name:
+            return d.resolve().name + "/"
+        if common is None:
+            return ""
+        rel = d.resolve().relative_to(common).as_posix()
+        return "" if rel == "." else rel + "/"
 
     for item in inputs:
         p = Path(item)
@@ -198,7 +212,7 @@ def find_images(
             for f in sorted(files):
                 if f.suffix.lower() in IMAGE_EXTENSIONS and not _is_cellphi_output(f):
                     rel = f.relative_to(p).as_posix()
-                    add(f, f"{p.resolve().name}/{rel}" if prefix_dirs else rel, p.resolve().name)
+                    add(f, prefix(p) + rel, p.resolve().name)
         elif p.is_file():
             add(p, p.name, p.resolve().parent.name)
         else:

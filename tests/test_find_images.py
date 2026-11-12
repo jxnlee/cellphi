@@ -66,3 +66,17 @@ def test_files_and_duplicates(tree):
 def test_missing_input(tmp_path):
     with pytest.raises(FileNotFoundError):
         find_images([tmp_path / "nope"])
+
+
+def test_same_named_wells_from_different_plates_stay_apart(tmp_path):
+    touch(tmp_path / "Midbrain" / "Plate 1" / "A1" / "x.jpg")
+    touch(tmp_path / "Midbrain" / "Plate 4-3" / "A1" / "y.jpg")
+    found = names(find_images([tmp_path / "Midbrain" / "Plate 1" / "A1", tmp_path / "Midbrain" / "Plate 4-3" / "A1"]))
+    assert found == ["Plate 1/A1/x.jpg", "Plate 4-3/A1/y.jpg"]
+
+
+def test_nested_input_folders_are_not_double_counted(tmp_path):
+    touch(tmp_path / "data" / "a.jpg")
+    touch(tmp_path / "data" / "sub" / "b.jpg")
+    found = names(find_images([tmp_path / "data", tmp_path / "data" / "sub"]))
+    assert found == ["a.jpg", "sub/b.jpg"]

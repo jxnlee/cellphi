@@ -52,5 +52,6 @@ def test_counts_and_sizes_match_reviewed_run(summary, name):
 
 def test_outputs_written(summary):
     _, out = summary
-    assert (out / "organoids.csv").stat().st_size > 0
     assert len(list(out.glob("*_annotated.jpg"))) == len(EXPECTED)
+    csvs = list(out.glob("*_organoids.csv"))
+    assert len(csvs) == len(EXPECTED) and all(f.stat().st_size > 0 for f in csvs)

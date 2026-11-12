@@ -9,6 +9,15 @@ from pathlib import Path
 from .measure import DEFAULT_DIAMETER, EXCLUDED_BORDER, EXCLUDED_FRAGMENT, EXCLUDED_SMALL, MEASURED, Organoid
 
 
+def ORGANOID_COLUMNS(unit: str = "um") -> list[str]:  # noqa: N802 (reads like a constant)
+    """Columns of the per-organoid CSV, in order."""
+    return [
+        "image", "id", f"diameter_{unit}", "touches_edge", f"equivalent_diameter_{unit}",
+        f"max_feret_diameter_{unit}", f"min_feret_diameter_{unit}", f"area_{unit}2",
+        "centroid_x_px", "centroid_y_px", f"{unit}_per_px",
+    ]
+
+
 def organoid_rows(
     image_name: str, organoids: list[Organoid], units_per_px: float, unit: str, diameter_method: str = DEFAULT_DIAMETER
 ) -> list[dict]:
@@ -69,10 +78,11 @@ def summary_row(
     }
 
 
-def write_csv(path: str | Path, rows: list[dict]) -> None:
+def write_csv(path: str | Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
+    """Write rows to a CSV. ``fieldnames`` fixes the columns, so a header is written even with no rows."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames: list[str] = []
+    fieldnames = list(fieldnames or [])
     for r in rows:
         fieldnames += [k for k in r if k not in fieldnames]
     with path.open("w", newline="") as f:

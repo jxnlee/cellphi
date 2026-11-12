@@ -67,9 +67,11 @@ def test_cli_end_to_end(tmp_path):
 
     assert (out / "Plate 1" / "A1" / "img1_annotated.jpg").exists()
     assert (out / "Plate 1" / "A2" / "img2_annotated.jpg").exists()
-    rows = read_csv(out / "organoids.csv")
-    a1 = [r for r in rows if r["image"] == "Plate 1/A1/img1.jpg"]
+    assert not (out / "organoids.csv").exists()  # one CSV per image, not a combined one
+    a1 = read_csv(out / "Plate 1" / "A1" / "img1_organoids.csv")
+    assert {r["image"] for r in a1} == {"Plate 1/A1/img1.jpg"}
     assert len(a1) == 3
+    assert len(read_csv(out / "Plate 1" / "A2" / "img2_organoids.csv")) == 1
     edge = [r for r in a1 if r["touches_edge"] == "yes"]
     assert len(edge) == 1  # the disk cut off by the right edge is measured and flagged
     complete = sorted(float(r["diameter_um"]) for r in a1 if r["touches_edge"] == "no")
@@ -97,11 +99,21 @@ def test_cli_options(tmp_path):
     rc = main([str(tmp_path / "img.jpg"), "-o", str(out), "--units-per-px", "1",
                "--exclude-edge", "--min-diameter", "50", "--diameter", "max_feret", "--no-auto-size"])
     assert rc == 0
-    (row,) = read_csv(out / "organoids.csv")
+    (row,) = read_csv(out / "img_organoids.csv")
     assert float(row["diameter_um"]) == float(row["max_feret_diameter_um"])
     s = read_csv(out / "summary.csv")[0]
     assert s["n_excluded_edge"] == "1" and s["n_excluded_small"] == "1"
     assert FakeSegmenter.hints == [None]  # --no-auto-size: no size hint
+
+
+def test_image_without_organoids_gets_csv_with_header(tmp_path):
+    from cellphi.results import ORGANOID_COLUMNS
+
+    write_image(tmp_path / "empty.jpg", [])
+    assert main([str(tmp_path / "empty.jpg"), "-o", str(tmp_path / "out")]) == 0
+    with (tmp_path / "out" / "empty_organoids.csv").open() as f:
+        assert f.read().strip().split(",") == ORGANOID_COLUMNS("um")
+    assert read_csv(tmp_path / "out" / "summary.csv")[0]["n_measured"] == "0"
 
 
 def test_cli_default_input_folder(tmp_path, monkeypatch, capsys):

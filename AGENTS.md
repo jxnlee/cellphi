@@ -61,7 +61,7 @@ Develop on **WSL2 (Linux, RTX 5070 GPU → needs the CUDA ≥ 12.8 torch build)*
 | `cellphi/measure.py` | `measure_masks()`: per-label measurement (Feret max/min/mean, area), fragment/edge/size handling, IDs, `DIAMETER_METHODS`. Pure numpy/OpenCV. |
 | `cellphi/pipeline.py` | `process_image()`: read → size estimate → Cellpose → fallback → measure. `DEFAULT_CALIBRATION`. `find_images()`: recursive folder search. |
 | `cellphi/draw.py` | `annotate()`: outlines (yellow / orange = edge / red = excluded), labels, the diameter line (`measure.diameter_line`), legend. |
-| `cellphi/results.py` | CSV rows (`organoid_rows`, `summary_row`, `write_csv`). |
+| `cellphi/results.py` | CSV rows (`organoid_rows`, `summary_row`, `write_csv`, `ORGANOID_COLUMNS`). Output: one `<image>_organoids.csv` per image next to its `_annotated.jpg` (user request, replaced the combined organoids.csv), plus one `summary.csv` for all images. |
 | `cellphi/cli.py` | `cellphi` command (argparse). |
 | `tests/` | Fast (CI): synthetic unit tests, `test_cli.py` (CLI with a fake segmenter), `test_real_images.py` (no model). Slow: `test_reference.py`, `test_pipeline_real.py` (Cellpose). |
 | `tools/extract_reference_lines.py` | Rebuilds `tests/data/reference_lines.json` from `reference/`. |

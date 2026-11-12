@@ -205,3 +205,10 @@ def test_annotate_draws_legend_and_line():
     plain = annotate(img, measure_masks(m), 2.2, legend=False, label="none")
     inside = plain[105:195, 155:245]  # square interior, away from the outline
     assert (inside != 200).any(axis=-1).sum() > 80  # a diameter line crosses it
+
+
+def test_organoid_columns_match_rows():
+    from cellphi.results import ORGANOID_COLUMNS
+
+    rows = organoid_rows("a.jpg", measure_masks(disk_mask((100, 100), (50, 50), 20)), 1.0, "um")
+    assert list(rows[0]) == ORGANOID_COLUMNS("um")

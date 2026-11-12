@@ -5,7 +5,7 @@ Cellphi measures organoids in brightfield microscope images. It finds every orga
 
 For each image you get:
 - an **annotated image**: every organoid is outlined and labelled with its number and diameter;
-- a **CSV file** with one row per organoid (number, diameter, other size measures, position, whether it touches the image edge);
+- a **CSV file per image** with one row per organoid (number, diameter, other size measures, position, whether it touches the image edge);
 - a **summary CSV** with the count, mean, median and spread of diameters per image.
 
 Cellphi's diameters agree with manual ImageJ measurements (see [Accuracy](#accuracy)).
@@ -56,8 +56,17 @@ About 6 seconds per image on an NVIDIA laptop GPU (RTX 5070).
 | File | Contents |
 |---|---|
 | `<image>_annotated.jpg` | **Yellow** outline: measured organoid, labelled `#number` and diameter in µm, with a **line showing that diameter** (its length is the reported value). **Orange** outline and `*` after the diameter: measured, but cut off by the image edge. **Red** outline: excluded (see below). A legend in the top-left corner names the diameter definition and the scale. |
-| `organoids.csv` | One row per measured organoid: `image, id, diameter_um, touches_edge, equivalent_diameter_um, max_feret_diameter_um, min_feret_diameter_um, area_um2, centroid_x_px, centroid_y_px, um_per_px`. `id` matches the `#number` on the image. |
+| `<image>_organoids.csv` | One CSV per image, next to its annotated image. One row per measured organoid: `image, id, diameter_um, touches_edge, equivalent_diameter_um, max_feret_diameter_um, min_feret_diameter_um, area_um2, centroid_x_px, centroid_y_px, um_per_px`. `id` matches the `#number` on the image. |
 | `summary.csv` | One row per image: counts, and mean/median/sd/min/max diameter, both for all measured organoids and for `complete_` ones only (not touching the edge). |
+
+For example, `cellphi` on `input/Midbrain Organoids/Plate 1 CM_CM/A1/KS217537.jpg` gives:
+
+```
+results/
+  summary.csv                                              <- one row per image, all images
+  Midbrain Organoids/Plate 1 CM_CM/A1/KS217537_annotated.jpg
+  Midbrain Organoids/Plate 1 CM_CM/A1/KS217537_organoids.csv  <- that image's organoids
+```
 
 ### What "diameter" means
 
@@ -80,7 +89,7 @@ Other definitions are in the CSV, and `--diameter` picks which one is used as `d
 
 An organoid cut off by the image edge is only partly visible, so its diameter is too small. These are
 measured but flagged (`touches_edge = yes`, orange outline, `*`). Use `summary.csv`'s `complete_…` columns,
-or filter `touches_edge = no` in `organoids.csv`, for statistics without them. `--exclude-edge` leaves them out entirely.
+or filter `touches_edge = no` in the `_organoids.csv` files, for statistics without them. `--exclude-edge` leaves them out entirely.
 
 ### What gets excluded (red outlines)
 
