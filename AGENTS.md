@@ -63,18 +63,31 @@ Develop on **WSL2 (Linux, RTX 5070 GPU → needs the CUDA ≥ 12.8 torch build)*
 | `cellphi/draw.py` | `annotate()`: outlines (yellow / orange = edge / red = excluded), labels, the diameter line (`measure.diameter_line`), legend. |
 | `cellphi/results.py` | CSV rows (`organoid_rows`, `summary_row`, `write_csv`). |
 | `cellphi/cli.py` | `cellphi` command (argparse). |
-| `tests/` | `test_measure.py`, `test_foreground.py`, `test_find_images.py` (fast, synthetic). `test_reference.py` (slow, real data vs manual). |
+| `tests/` | Fast (CI): synthetic unit tests, `test_cli.py` (CLI with a fake segmenter), `test_real_images.py` (no model). Slow: `test_reference.py`, `test_pipeline_real.py` (Cellpose). |
 | `tools/extract_reference_lines.py` | Rebuilds `tests/data/reference_lines.json` from `reference/`. |
+| `tools/check_before_push.sh`, `.githooks/pre-push` | Local pre-push check (fast + slow tests). |
+| `.github/workflows/tests.yml`, `requirements-ci.txt` | GitHub Actions CI (fast tests, no model). |
 | `notebooks/example.ipynb` | Example for Jupyter/Colab. |
 
 ## Dev workflow
 
 ```bash
 source .venv/bin/activate         # venv with Python 3.12; pip install -r requirements.txt
-pytest -q                         # fast unit tests (~3 s), no Cellpose
-pytest -m slow                    # accuracy vs manual measurements (~1 min GPU)
-cellphi input/ -o /tmp/results --save-masks   # full run, ~6 s/image on the RTX 5070
+pytest -q                         # fast tests (~5 s), no Cellpose: what CI runs
+pytest -m slow                    # Cellpose on real images: accuracy vs manual + reviewed run (~80 s GPU)
+tools/check_before_push.sh        # both of the above; also the optional pre-push hook (.githooks/)
+cellphi -o /tmp/results --save-masks   # full run on ./input, ~6 s/image on the RTX 5070
 ```
+
+CI (`.github/workflows/tests.yml`): fast tests on ubuntu (3.10, 3.12), macOS, Windows, installed from
+`requirements-ci.txt` + `pip install -e . --no-deps` (no Cellpose/torch). So **nothing imported at module
+level may need cellpose/torch**: keep those imports inside functions (`segment.py`), as now. The fast CLI
+test (`tests/test_cli.py`) replaces `cellphi.segment.Segmenter` with a threshold-based fake; keep the CLI
+importing `Segmenter` from `cellphi.segment` inside `main()` so the monkeypatch works. If you add a core
+dependency, add it to `requirements-ci.txt` too.
+
+Tests: `test_measure.py`, `test_foreground.py`, `test_find_images.py`, `test_cli.py` (synthetic);
+`test_real_images.py` (real images, no model); `test_reference.py`, `test_pipeline_real.py` (slow, Cellpose).
 
 To iterate on measurement logic without re-running Cellpose, save masks once (`--save-masks`) and call
 `measure_masks` on them. **Always look at annotated images** after changing segmentation or measurement.

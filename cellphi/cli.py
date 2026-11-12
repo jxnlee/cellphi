@@ -35,8 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Segment organoids with Cellpose and measure their diameters.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("inputs", nargs="+",
-                   help="image files and/or folders (folders are searched recursively, including subfolders)")
+    p.add_argument("inputs", nargs="*", default=["input"],
+                   help="image files and/or folders (folders are searched recursively, including subfolders); "
+                        "default: the 'input' folder")
     p.add_argument("--no-recursive", action="store_true", help="only use images directly inside the given folders")
     p.add_argument("-o", "--output", default="results", help="output folder")
     p.add_argument("--version", action="version", version=f"cellphi {__version__}")
@@ -116,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         images = find_images(args.inputs, recursive=not args.no_recursive, exclude_dirs=[out])
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        hint = " (give image files or folders, e.g. 'cellphi my_images/')" if args.inputs == ["input"] else ""
+        print(f"Error: {e}{hint}", file=sys.stderr)
         return 1
     if not images:
         print("Error: no images found.", file=sys.stderr)

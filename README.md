@@ -36,7 +36,8 @@ pip install -r requirements.txt    # installs everything, including GPU-enabled 
 ## Usage
 
 ```bash
-cellphi input/ -o results/                              # every image in a folder, including all subfolders
+cellphi                                                 # every image in ./input (all subfolders) -> ./results
+cellphi input/ -o results/                              # the same, spelled out
 cellphi "input/Midbrain Organoids/Plate 1 CM_CM/A1"     # one well
 cellphi input/ --no-recursive                           # only images directly in input/, not subfolders
 cellphi --help                                          # all options
@@ -160,6 +161,24 @@ write_csv("organoids.csv", organoid_rows(res.name, res.organoids, res.units_per_
 - Check the annotated images, especially crowded areas and anything orange (edge) or unusual.
 - An organoid mostly hidden behind others is measured from the part that's visible, so it reads small.
 - Keep focus, exposure and magnification the same across an experiment, and calibrate once per objective.
+
+## Development and testing
+
+```bash
+pytest                              # fast tests (~5 s, no model needed); the same tests GitHub runs
+tools/check_before_push.sh          # fast tests + tests that run Cellpose on the real images (~1-2 min on a GPU)
+git config core.hooksPath .githooks # optional: run tools/check_before_push.sh automatically before every git push
+```
+
+- **GitHub Actions** (`.github/workflows/tests.yml`) runs the fast tests on every push and pull request,
+  on Linux (Python 3.10 and 3.12), macOS and Windows. It installs everything except Cellpose/PyTorch
+  (`requirements-ci.txt`), since GitHub's machines have no GPU and the fast tests don't need the model.
+  They still test the whole command-line tool, using a simple stand-in for Cellpose, and check the size
+  estimate and the dark-organoid fallback on the real images in `reference/` and `input/`.
+- **Model tests** (`pytest -m slow`) run Cellpose. They compare Cellphi with the manual measurements in
+  `reference/` and with a reviewed run on five very different wells. Run them before pushing changes
+  to the analysis. If a change moves the numbers, look at the annotated images before updating the
+  expected values in `tests/test_pipeline_real.py`.
 
 ## Roadmap
 
