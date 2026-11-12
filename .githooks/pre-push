@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Optional: runs all tests (including Cellpose on real images) before every push.
+# Enable once with:   git config core.hooksPath .githooks
+# Skip for one push:  git push --no-verify
+exec "$(git rev-parse --show-toplevel)/tools/check_before_push.sh"

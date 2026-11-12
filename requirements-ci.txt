@@ -1,0 +1,8 @@
+# Lightweight dependencies for CI: everything except Cellpose/PyTorch (no GPU on GitHub runners,
+# and the fast tests don't run the model). Install the package itself with `pip install -e . --no-deps`.
+# Keep in sync with [project.dependencies] in pyproject.toml.
+numpy>=1.24
+opencv-python-headless>=4.8
+scipy>=1.10
+tifffile
+pytest>=7
